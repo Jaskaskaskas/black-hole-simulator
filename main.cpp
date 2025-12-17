@@ -1,20 +1,36 @@
 #include <SDL2/SDL.h>
 
+#include <algorithm>
+#include <cmath>
 #include <deque>
 #include <iostream>
 #include <vector>
 
 #include "SDL_tools.h"
 
+const float dlambda = 0.1f;
+struct trace {
+  std::deque<std::pair<float, float>> head;
+  size_t max_length = 255;
+};
 struct photon {
   float x, y;
   float vx, vy;
   float r, phi;
+  float dr, dphi;
+  float L, E;
+  float b;
+  float dt;
+  trace t;
 };
 
-struct trace {
-  std::deque<photon> head;
-  size_t max_length = 255;
+struct photons {
+  std::vector<photon> list;
+};
+
+struct blackhole {
+  float x, y;
+  float sradius;
 };
 
 int main(int argc, char* argv[]) {
@@ -47,16 +63,29 @@ int main(int argc, char* argv[]) {
   bool running = true;
   SDL_Event e;
 
-  // moving rectangle state
-  SDL_Rect rect{100, 100, 100, 100};
-  int vx = 3;  // velocity x
-  int vy = 2;  // velocity y
-
   // The origin is at the center of the window
-  photon p = {0.0f, 0.0f, 1.0f, 0.0f};
-  p.r = hypot(p.x, p.y);
+  blackhole bh = {0.0f, 0.0f, 50.0f};
+
+  photon p = {-250.0f, 200.0f, 100.0f, -100.0f};
+  p.r = hypotf(p.x, p.y);
   p.phi = atan2f(p.y, p.x);
-  trace t;
+
+  p.dr = (p.x / sqrtf(p.x * p.x + p.y * p.y)) * p.vx +
+         (p.y / sqrtf(p.x * p.x + p.y * p.y)) * p.vy;
+  p.dphi = (p.x / (p.x * p.x + p.y * p.y)) * p.vy -
+           (p.y / (p.x * p.x + p.y * p.y)) * p.vx;
+
+  if (p.vy <= 1e-6f && p.vy >= -1e-6f)
+    p.vy = 1e-6f;  // Prevent division by zero
+  float k = -p.vx / p.vy;
+  float c = p.y - k * p.x;
+  p.b = std::abs((k * p.x - p.y + c) / sqrtf(k * k + 1));
+  p.L = p.b;
+  p.E = 1.0f;
+  p.dt = 0.016f;  // ~60 FPS
+
+  photons ps;
+  ps.list.push_back(p);
 
   while (running) {
     while (SDL_PollEvent(&e)) {
@@ -65,43 +94,44 @@ int main(int argc, char* argv[]) {
         if (e.key.keysym.sym == SDLK_ESCAPE) running = false;
       }
     }
+    for (auto it = ps.list.begin(); it != ps.list.end();) {
+      photon& p = *it;
+      if (p.r <= bh.sradius) {
+        // Photon is within the black hole's Schwarzschild radius
+        std::cout << "Photon absorbed by black hole!" << std::endl;
+        it = ps.list.erase(it);
+        continue;
+      }
 
-    // update rectangle position
-    rect.x += vx;
-    rect.y += vy;
-    if (rect.x <= 0 || rect.x + rect.w >= WIN_W) vx = -vx;
-    if (rect.y <= 0 || rect.y + rect.h >= WIN_H) vy = -vy;
+      p.t.head.push_front(std::make_pair(p.x, p.y));
+      if (p.t.head.size() > p.t.max_length) {
+        p.t.head.pop_back();
+      }
 
-    t.head.push_front(p);
-    if (t.head.size() > t.max_length) {
-      t.head.pop_back();
+      p.r = hypotf(p.x, p.y);
+      p.x += p.vx * p.dt;
+      p.y += p.vy * p.dt;
+
+      ++it;
     }
 
-    p.x += p.vx;
-    p.y += p.vy;
-    p.r = hypot(p.x, p.y);
-    p.phi = atan2f(p.y, p.x);
-
-    // Clear with dark blue
-    SDL_SetRenderDrawColor(ren, 10, 24, 74, 255);
+    // SDL_SetRenderDrawColor(ren, 10, 24, 74, 255);
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
     SDL_RenderClear(ren);
-
-    // Draw a filled rectangle (orange)
-    SDL_SetRenderDrawColor(ren, 255, 140, 0, 255);
-    SDL_RenderFillRect(ren, &rect);
-
-    // Draw a white border around the rectangle
-    SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
-    SDL_RenderDrawRect(ren, &rect);
-
     // Draw photon
     SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
-    drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
 
-    int x = 0;
-    for (photon pt : t.head) {
-      SDL_SetRenderDrawColor(ren, 255 - x++, 0, 0, 0);
-      drawCircle(ren, pt.x + WIN_W / 2, pt.y + WIN_H / 2, 3);
+    drawCircle(ren, bh.x + WIN_W / 2, bh.y + WIN_H / 2, bh.sradius);
+
+    for (photon p : ps.list) {
+      drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
+      int x = 0;
+      for (std::pair<float, float> pt : p.t.head) {
+        int alpha = std::max(0, 255 - x);
+        SDL_SetRenderDrawColor(ren, alpha, 0, 0, 255);
+        drawCircle(ren, pt.first + WIN_W / 2, pt.second + WIN_H / 2, 3);
+        x++;
+      }
     }
 
     SDL_RenderPresent(ren);
