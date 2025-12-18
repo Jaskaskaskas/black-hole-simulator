@@ -66,23 +66,25 @@ int main(int argc, char* argv[]) {
   // The origin is at the center of the window
   blackhole bh = {0.0f, 0.0f, 50.0f};
 
-  photon p = {-250.0f, 200.0f, 100.0f, -100.0f};
+  photon p = {-200.0f, 200.0f, -100.0f, 0.0f};
   p.r = hypotf(p.x, p.y);
   p.phi = atan2f(p.y, p.x);
 
-  p.dr = (p.x / sqrtf(p.x * p.x + p.y * p.y)) * p.vx +
-         (p.y / sqrtf(p.x * p.x + p.y * p.y)) * p.vy;
-  p.dphi = (p.x / (p.x * p.x + p.y * p.y)) * p.vy -
-           (p.y / (p.x * p.x + p.y * p.y)) * p.vx;
-
+  printf("vx: %f, vy: %f\n", p.vx, p.vy);
   if (p.vy <= 1e-6f && p.vy >= -1e-6f)
     p.vy = 1e-6f;  // Prevent division by zero
-  float k = -p.vx / p.vy;
+  float k = -p.vy / p.vx;
+  printf("k: %f\n", k);
   float c = p.y - k * p.x;
-  p.b = std::abs((k * p.x - p.y + c) / sqrtf(k * k + 1));
+  printf("c: %f\n", c);
+  p.b = std::abs(c) / sqrtf(p.vx * p.vx + p.vy * p.vy);
   p.L = p.b;
   p.E = 1.0f;
-  p.dt = 0.016f;  // ~60 FPS
+
+  p.dphi = p.b / (p.r * p.r);
+  // p.dr = sqrtf(p.E * p.E - (1.0f - 2.0f / p.r) * (p.b * p.b / (p.r * p.r)));
+  p.dr = -sqrtf(1.0f - (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r)));
+  p.dt = 1.0f / (1.0f - bh.sradius / p.r);
 
   photons ps;
   ps.list.push_back(p);
@@ -107,10 +109,22 @@ int main(int argc, char* argv[]) {
       if (p.t.head.size() > p.t.max_length) {
         p.t.head.pop_back();
       }
+      printf("dr: %f, r: %f, phi: %f, b: %f\n", p.dr, p.r, p.phi, p.b);
+      p.dphi = p.b / (p.r * p.r);
+      if (p.dr > 1e-9f) {
+        p.dr = p.dr =
+            sqrtf(1.0f - (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r)));
+      } else {
+        p.dr = -sqrtf(1.0f -
+                      (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r)));
+      }
+      p.dt = 1.0f / (1.0f - bh.sradius / p.r);
 
-      p.r = hypotf(p.x, p.y);
-      p.x += p.vx * p.dt;
-      p.y += p.vy * p.dt;
+      p.r += p.dr * p.dt;
+      p.phi += p.dphi * p.dt;
+
+      p.x = p.r * cosf(p.phi);
+      p.y = p.r * sinf(p.phi);
 
       ++it;
     }
