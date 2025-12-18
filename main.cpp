@@ -81,35 +81,32 @@ int main(int argc, char* argv[]) {
   bool running = true;
   SDL_Event e;
 
-  image img = {15, 15, std::vector<uint8_t>(img.width * img.height * 3, 20)};
+  image img = {100, 100, std::vector<uint8_t>(img.width * img.height * 3, 20)};
 
   // The origin is at the center of the window
   blackhole bh = {0.0f, 0.0f, 50.0f};
-  accretiondisk ad = {bh.sradius * 1.5f, bh.sradius * 4.0f, 100.0f};
+  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 100.0f};
 
   float c = 1.0f;
-  float angle = 0.0f * M_PI / 180.0f;
+  float angle = -45.0f * M_PI / 180.0f;
 
-  const float Y = 75.0f;
-  const float Z = 75.0f;
-  const float dy = 4.0f;
-  const float dz = 4.0f;
+  const float X = -100.0f;
+  const float Y = -250.0f;
+  const float Z = -250.0f;
+  const float dy = 5.0f;
+  const float dz = 5.0f;
 
   photons ps;
   for (int x = 0; x < img.width; x++) {
     for (int y = 0; y < img.height; y++) {
-      photon p = {x,
-                  y,
-                  -200.0f,
-                  Y + y * dy,
-                  Z + x * dz,
-                  c * cosf(angle),
-                  c * sinf(-angle)};
+      photon p = {
+          x, y, X, Y + y * dy, Z + x * dz, c * cosf(angle), c * sinf(-angle)};
       ps.list.push_back(p);
       // printf("Created photon at (%f, %f, %f)\n", p.x, p.y, p.z);
     }
   }
   for (photon& p : ps.list) {
+    printf("Initializing photon at (%f, %f, %f)\n", p.x, p.y, p.z);
     // p.angle = M_PI / 2.0f;
     p.active = true;
     p.y = hypotf(p.y, p.z);
@@ -223,7 +220,7 @@ int main(int argc, char* argv[]) {
                        -(int)ad.outer_r + WIN_W / 2, WIN_H / 2);
 
     for (photon p : ps.list) {
-      running = running && p.r < 500.0f;
+      running = running && p.r < 1000.0f;
       SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
       drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
       int x = 0;
