@@ -28,6 +28,7 @@ struct photon {
   float dt;
   float angle;
   float brightness = 0.0f;
+  bool active;
   trace t;
 };
 
@@ -89,60 +90,37 @@ int main(int argc, char* argv[]) {
   float c = 1.0f;
   float angle = 0.0f * M_PI / 180.0f;
 
+  const float Y = 75.0f;
+  const float Z = 75.0f;
+  const float dy = 4.0f;
+  const float dz = 4.0f;
+
   photons ps;
   for (int x = 0; x < img.width; x++) {
     for (int y = 0; y < img.height; y++) {
       photon p = {x,
                   y,
                   -200.0f,
-                  80.0f + y * 10.0f,
-                  80.0f + x * 10.0f,
+                  Y + y * dy,
+                  Z + x * dz,
                   c * cosf(angle),
                   c * sinf(-angle)};
       ps.list.push_back(p);
-      printf("Created photon at (%f, %f, %f)\n", p.x, p.y, p.z);
+      // printf("Created photon at (%f, %f, %f)\n", p.x, p.y, p.z);
     }
   }
-  // photon p1 = {0, 0, -200.0f, 80.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p2 = {0, 1, -200.0f, 90.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p3 = {0, 2, -200.0f, 100.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p4 = {0, 3, -200.0f, 110.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p5 = {0, 4, -200.0f, 120.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p6 = {0, 5, -200.0f, 130.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p7 = {0, 6, -200.0f, 140.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p8 = {0, 7, -200.0f, 150.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p9 = {0, 8, -200.0f, 160.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p10 = {0, 9, -200.0f, 170.0f, c * cosf(angle), c * sinf(-angle)};
-
-  // photon p11 = {0, 10, -200.0f, 180.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p12 = {0, 11, -200.0f, 190.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p13 = {0, 12, -200.0f, 200.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p14 = {0, 13, -200.0f, 210.0f, c * cosf(angle), c * sinf(-angle)};
-  // photon p15 = {0, 14, -200.0f, 220.0f, c * cosf(angle), c * sinf(-angle)};
-
-  // ps.list.push_back(p1);
-  // ps.list.push_back(p2);
-  // ps.list.push_back(p3);
-  // ps.list.push_back(p4);
-  // ps.list.push_back(p5);
-  // ps.list.push_back(p6);
-  // ps.list.push_back(p7);
-  // ps.list.push_back(p8);
-  // ps.list.push_back(p9);
-  // ps.list.push_back(p10);
-  // ps.list.push_back(p11);
-  // ps.list.push_back(p12);
-  // ps.list.push_back(p13);
-  // ps.list.push_back(p14);
-  // ps.list.push_back(p15);
-
   for (photon& p : ps.list) {
     // p.angle = M_PI / 2.0f;
+    p.active = true;
+    p.y = hypotf(p.y, p.z);
+
     p.angle = atan2(p.y, p.z);
-    printf("Photon angle: %f degrees\n", p.angle * 180.0f / M_PI);
+    // printf("Photon angle: %f degrees\n", p.angle * 180.0f / M_PI);
 
     p.r = hypotf(p.x, p.y);
-    p.phi = atan2f(p.y, p.x);
+    // p.phi = acosf(p.x / sqrtf(p.x * p.x + p.y * p.y + p.z * p.z));
+    p.phi = atan2(p.y, p.x);
+
     p.L = p.x * p.vy - p.y * p.vx;
     float speed = sqrtf(p.vx * p.vx + p.vy * p.vy);
     p.E = speed;
@@ -165,44 +143,54 @@ int main(int argc, char* argv[]) {
         if (e.key.keysym.sym == SDLK_ESCAPE) running = false;
       }
     }
+#pragma omp parallel for
     for (auto it = ps.list.begin(); it != ps.list.end();) {
+      if (!it->active) {
+        ++it;
+        continue;
+      }
       photon& p = *it;
       if (p.r > ad.inner_r && p.r < ad.outer_r) {
         // Photon is in the accretion disk
         if (p.angle != 0.0f) {
           if (fabsf(fmodf(p.phi, M_PI)) < 10.0f / p.r) {
-            printf("the value %f\n", fmodf(p.phi, M_PI));
+            // printf("the value %f\n", fmodf(p.phi, M_PI));
             p.brightness = ad.brightness;
-            img.data[img.width * p.idx + p.idy] =
-                std::min(255, (int)(img.data[3 * (0 * img.width + 0) + 0] +
-                                    (uint8_t)p.brightness));
-            printf("Photon %d brightness increased to %f\n", p.idx,
-                   p.brightness);
-            it = ps.list.erase(it);
-            continue;
+            img.data[3 * (img.width * p.idx + p.idy)] = std::min(
+                255, (int)(img.data[3 * (p.idx * img.width + p.idy) + 0] +
+                           (uint8_t)p.brightness));
+            // printf("Photon %d brightness increased to %f\n", p.idx *
+            // img.width + p.idy, p.brightness); it = ps.list.erase(it);
+            p.active = false;
+            ++it;
+            // continue;
           }
         } else {
           p.brightness = ad.brightness;
-          img.data[img.width * p.idx + p.idy] =
-              std::min(255, (int)(img.data[3 * (0 * img.width + 0) + 0] +
-                                  (uint8_t)p.brightness));
-          printf("Photon %d brightness increased to %f\n", p.idx, p.brightness);
-          it = ps.list.erase(it);
-          continue;
+          img.data[3 * (img.width * p.idx + p.idy)] = std::min(
+              255, (int)(img.data[3 * (p.idx * img.width + p.idy) + 0] +
+                         (uint8_t)p.brightness));
+          // printf("Photon %d brightness increased to %f\n",p.idx * img.width +
+          // p.idy, p.brightness); it = ps.list.erase(it);
+          p.active = false;
+          ++it;
+          // continue;
         }
       }
 
       if (p.r <= bh.sradius) {
         // Photon is within the black hole's Schwarzschild radius
-        std::cout << "Photon absorbed by black hole!" << std::endl;
-        img.data[img.width * p.idx + p.idy] = p.brightness;
-        it = ps.list.erase(it);
-        continue;
+        // std::cout << "Photon absorbed by black hole!" << std::endl;
+        img.data[3 * (img.width * p.idx + p.idy)] = p.brightness;
+        // it = ps.list.erase(it);
+        p.active = false;
+        ++it;
+        // continue;
       }
-      p.t.head.push_front(std::make_pair(p.x, p.y));
-      if (p.t.head.size() > p.t.max_length) {
-        p.t.head.pop_back();
-      }
+      // p.t.head.push_front(std::make_pair(p.x, p.y));
+      // if (p.t.head.size() > p.t.max_length) {
+      //   p.t.head.pop_back();
+      // }
       // printf("dr: %f, r: %f, phi: %f, b: %f\n", p.dr, p.r, p.phi, p.b);
 
       float d2r = -bh.sradius / (2.0f * p.r * p.r) +
@@ -235,6 +223,7 @@ int main(int argc, char* argv[]) {
                        -(int)ad.outer_r + WIN_W / 2, WIN_H / 2);
 
     for (photon p : ps.list) {
+      running = running && p.r < 500.0f;
       SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
       drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
       int x = 0;
@@ -248,12 +237,15 @@ int main(int argc, char* argv[]) {
 
     SDL_RenderPresent(ren);
 
-    SDL_Delay(16);  // ~60 FPS
+    // SDL_Delay(16);  // ~60 FPS
+    // SDL_Delay(1);
   }
 
   for (int x = 0; x < img.width; x++) {
     for (int y = 0; y < img.height; y++) {
-      printf("%d ", (int)img.data[3 * (y * img.width + x) + 0]);
+      printf("%d ", (int)img.data[3 * (x * img.width + y)]);
+      // printf("x: %d y: %d value: %d | \n", x, y,
+      //        (int)img.data[3 * (y * img.width + x)]);
     }
     printf("\n");
   }
