@@ -18,6 +18,7 @@ struct trace {
   size_t max_length = 255;
 };
 struct photon {
+  int idx, idy;
   float x, y;
   float vx, vy;
   float r, phi;
@@ -25,7 +26,14 @@ struct photon {
   float L, E;
   float b;
   float dt;
+  float angle;
+  float brightness = 0.0f;
   trace t;
+};
+
+struct accretiondisk {
+  float inner_r, outer_r;
+  float brightness;
 };
 
 struct photons {
@@ -35,6 +43,11 @@ struct photons {
 struct blackhole {
   float x, y;
   float sradius;
+};
+
+struct image {
+  int width, height;
+  std::vector<uint8_t> data;  // RGB format
 };
 
 int main(int argc, char* argv[]) {
@@ -67,21 +80,24 @@ int main(int argc, char* argv[]) {
   bool running = true;
   SDL_Event e;
 
+  image img = {1, 10, std::vector<uint8_t>(1 * 10 * 3, 0)};
+
   // The origin is at the center of the window
   blackhole bh = {0.0f, 0.0f, 50.0f};
+  accretiondisk ad = {bh.sradius * 1.5f, bh.sradius * 4.0f, 100.0f};
 
   float c = 1.0f;
   float angle = 0.0f * M_PI / 180.0f;  // Convert 135 degrees to radians
-  photon p1 = {-200.0f, 114.55f, c * cosf(angle), c * sinf(-angle)};
-  photon p2 = {-200.0f, 114.56f, c * cosf(angle), c * sinf(-angle)};
-  photon p3 = {-200.0f, 114.57f, c * cosf(angle), c * sinf(-angle)};
-  photon p4 = {-200.0f, 114.58f, c * cosf(angle), c * sinf(-angle)};
-  photon p5 = {-200.0f, 114.59f, c * cosf(angle), c * sinf(-angle)};
-  photon p6 = {-200.0f, 114.60f, c * cosf(angle), c * sinf(-angle)};
-  photon p7 = {-200.0f, 114.61f, c * cosf(angle), c * sinf(-angle)};
-  photon p8 = {-200.0f, 114.62f, c * cosf(angle), c * sinf(-angle)};
-  photon p9 = {-200.0f, 114.63f, c * cosf(angle), c * sinf(-angle)};
-  photon p10 = {-200.0f, 114.64f, c * cosf(angle), c * sinf(-angle)};
+  photon p1 = {0, 0, -200.0f, 114.55f, c * cosf(angle), c * sinf(-angle)};
+  photon p2 = {0, 1, -200.0f, 114.56f, c * cosf(angle), c * sinf(-angle)};
+  photon p3 = {0, 2, -200.0f, 114.57f, c * cosf(angle), c * sinf(-angle)};
+  photon p4 = {0, 3, -200.0f, 114.58f, c * cosf(angle), c * sinf(-angle)};
+  photon p5 = {0, 4, -200.0f, 114.59f, c * cosf(angle), c * sinf(-angle)};
+  photon p6 = {0, 5, -200.0f, 114.60f, c * cosf(angle), c * sinf(-angle)};
+  photon p7 = {0, 6, -200.0f, 114.61f, c * cosf(angle), c * sinf(-angle)};
+  photon p8 = {0, 7, -200.0f, 114.62f, c * cosf(angle), c * sinf(-angle)};
+  photon p9 = {0, 8, -200.0f, 114.63f, c * cosf(angle), c * sinf(-angle)};
+  photon p10 = {0, 9, -200.0f, 114.64f, c * cosf(angle), c * sinf(-angle)};
 
   photons ps;
   ps.list.push_back(p1);
@@ -96,6 +112,8 @@ int main(int argc, char* argv[]) {
   ps.list.push_back(p10);
 
   for (photon& p : ps.list) {
+    p.angle = M_1_PI / 2;
+
     p.r = hypotf(p.x, p.y);
     p.phi = atan2f(p.y, p.x);
     p.L = p.x * p.vy - p.y * p.vx;
@@ -122,18 +140,34 @@ int main(int argc, char* argv[]) {
     }
     for (auto it = ps.list.begin(); it != ps.list.end();) {
       photon& p = *it;
-      if (p.r <= bh.sradius) {
-        // Photon is within the black hole's Schwarzschild radius
-        std::cout << "Photon absorbed by black hole!" << std::endl;
-        it = ps.list.erase(it);
-        continue;
+      if (p.r > ad.inner_r && p.r < ad.outer_r) {
+        // Photon is in the accretion disk
+        if (p.angle != 0.0f) {
+          if (fabsf(fmodf(p.phi, M_PI)) < 10.0f / p.r) {
+            printf("the value %f\n", fmodf(p.phi, M_PI));
+            p.brightness = ad.brightness;
+            img.data[img.width * p.idx + p.idy] =
+                std::min(255, (int)(img.data[3 * (0 * img.width + 0) + 0] +
+                                    (uint8_t)p.brightness));
+            printf("Photon %d brightness increased to %f\n", p.idx,
+                   p.brightness);
+            it = ps.list.erase(it);
+            continue;
+          }
+        }
+        if (p.r <= bh.sradius) {
+          // Photon is within the black hole's Schwarzschild radius
+          std::cout << "Photon absorbed by black hole!" << std::endl;
+          it = ps.list.erase(it);
+          continue;
+        }
       }
 
       p.t.head.push_front(std::make_pair(p.x, p.y));
       if (p.t.head.size() > p.t.max_length) {
         p.t.head.pop_back();
       }
-      printf("dr: %f, r: %f, phi: %f, b: %f\n", p.dr, p.r, p.phi, p.b);
+      // printf("dr: %f, r: %f, phi: %f, b: %f\n", p.dr, p.r, p.phi, p.b);
 
       float d2r = -bh.sradius / (2.0f * p.r * p.r) +
                   (1.0f - bh.sradius / p.r) * p.L * p.L / (p.r * p.r * p.r);
@@ -158,6 +192,11 @@ int main(int argc, char* argv[]) {
     SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
 
     drawCircle(ren, bh.x + WIN_W / 2, bh.y + WIN_H / 2, bh.sradius);
+    SDL_RenderDrawLine(ren, (int)ad.inner_r + WIN_W / 2, 0 + WIN_H / 2,
+                       (int)ad.outer_r + WIN_W / 2, WIN_H / 2);
+
+    SDL_RenderDrawLine(ren, -(int)ad.inner_r + WIN_W / 2, 0 + WIN_H / 2,
+                       -(int)ad.outer_r + WIN_W / 2, WIN_H / 2);
 
     for (photon p : ps.list) {
       SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
@@ -174,6 +213,10 @@ int main(int argc, char* argv[]) {
     SDL_RenderPresent(ren);
 
     SDL_Delay(16);  // ~60 FPS
+  }
+
+  for (auto pixel : img.data) {
+    std::cout << (int)pixel << " ";
   }
 
   SDL_DestroyRenderer(ren);
