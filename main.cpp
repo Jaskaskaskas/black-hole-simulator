@@ -8,7 +8,11 @@
 
 #include "SDL_tools.h"
 
-const float dlambda = 0.1f;
+inline float sign(float x) {
+  return (x > 0.0f) ? 1.0f : ((x < 0.0f) ? -1.0f : 0.0f);
+}
+
+const float dlambda = 1.0f;
 struct trace {
   std::deque<std::pair<float, float>> head;
   size_t max_length = 255;
@@ -66,28 +70,48 @@ int main(int argc, char* argv[]) {
   // The origin is at the center of the window
   blackhole bh = {0.0f, 0.0f, 50.0f};
 
-  photon p = {-200.0f, 200.0f, -100.0f, 0.0f};
-  p.r = hypotf(p.x, p.y);
-  p.phi = atan2f(p.y, p.x);
-
-  printf("vx: %f, vy: %f\n", p.vx, p.vy);
-  if (p.vy <= 1e-6f && p.vy >= -1e-6f)
-    p.vy = 1e-6f;  // Prevent division by zero
-  float k = -p.vy / p.vx;
-  printf("k: %f\n", k);
-  float c = p.y - k * p.x;
-  printf("c: %f\n", c);
-  p.b = std::abs(c) / sqrtf(p.vx * p.vx + p.vy * p.vy);
-  p.L = p.b;
-  p.E = 1.0f;
-
-  p.dphi = p.b / (p.r * p.r);
-  // p.dr = sqrtf(p.E * p.E - (1.0f - 2.0f / p.r) * (p.b * p.b / (p.r * p.r)));
-  p.dr = -sqrtf(1.0f - (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r)));
-  p.dt = 1.0f / (1.0f - bh.sradius / p.r);
+  float c = 1.0f;
+  float angle = 0.0f * M_PI / 180.0f;  // Convert 135 degrees to radians
+  photon p1 = {-200.0f, 114.55f, c * cosf(angle), c * sinf(-angle)};
+  photon p2 = {-200.0f, 114.56f, c * cosf(angle), c * sinf(-angle)};
+  photon p3 = {-200.0f, 114.57f, c * cosf(angle), c * sinf(-angle)};
+  photon p4 = {-200.0f, 114.58f, c * cosf(angle), c * sinf(-angle)};
+  photon p5 = {-200.0f, 114.59f, c * cosf(angle), c * sinf(-angle)};
+  photon p6 = {-200.0f, 114.60f, c * cosf(angle), c * sinf(-angle)};
+  photon p7 = {-200.0f, 114.61f, c * cosf(angle), c * sinf(-angle)};
+  photon p8 = {-200.0f, 114.62f, c * cosf(angle), c * sinf(-angle)};
+  photon p9 = {-200.0f, 114.63f, c * cosf(angle), c * sinf(-angle)};
+  photon p10 = {-200.0f, 114.64f, c * cosf(angle), c * sinf(-angle)};
 
   photons ps;
-  ps.list.push_back(p);
+  ps.list.push_back(p1);
+  ps.list.push_back(p2);
+  ps.list.push_back(p3);
+  ps.list.push_back(p4);
+  ps.list.push_back(p5);
+  ps.list.push_back(p6);
+  ps.list.push_back(p7);
+  ps.list.push_back(p8);
+  ps.list.push_back(p9);
+  ps.list.push_back(p10);
+
+  for (photon& p : ps.list) {
+    p.r = hypotf(p.x, p.y);
+    p.phi = atan2f(p.y, p.x);
+    p.L = p.x * p.vy - p.y * p.vx;
+    float speed = sqrtf(p.vx * p.vx + p.vy * p.vy);
+    p.E = speed;
+    p.b = p.L / p.E;
+
+    float vr = (p.x * p.vx + p.y * p.vy) / p.r;
+    float dr_mag = sqrtf(std::max(
+        0.0f, 1.0f - (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r))));
+
+    p.dr = vr > 0 ? dr_mag : -dr_mag;
+    p.dphi = p.b / (p.r * p.r);
+
+    p.dt = 1.0f / (1.0f - bh.sradius / p.r);
+  }
 
   while (running) {
     while (SDL_PollEvent(&e)) {
@@ -110,18 +134,16 @@ int main(int argc, char* argv[]) {
         p.t.head.pop_back();
       }
       printf("dr: %f, r: %f, phi: %f, b: %f\n", p.dr, p.r, p.phi, p.b);
-      p.dphi = p.b / (p.r * p.r);
-      if (p.dr > 1e-9f) {
-        p.dr = p.dr =
-            sqrtf(1.0f - (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r)));
-      } else {
-        p.dr = -sqrtf(1.0f -
-                      (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r)));
-      }
-      p.dt = 1.0f / (1.0f - bh.sradius / p.r);
 
-      p.r += p.dr * p.dt;
-      p.phi += p.dphi * p.dt;
+      float d2r = -bh.sradius / (2.0f * p.r * p.r) +
+                  (1.0f - bh.sradius / p.r) * p.L * p.L / (p.r * p.r * p.r);
+
+      // p.dt = 1.0f / (1.0f - bh.sradius / p.r);
+      p.dr += d2r * dlambda;  // Velocity evolves
+      p.r += p.dr * dlambda;  // Position evolves
+
+      p.dphi = p.L / (p.r * p.r);
+      p.phi += p.dphi * dlambda;
 
       p.x = p.r * cosf(p.phi);
       p.y = p.r * sinf(p.phi);
@@ -138,6 +160,7 @@ int main(int argc, char* argv[]) {
     drawCircle(ren, bh.x + WIN_W / 2, bh.y + WIN_H / 2, bh.sradius);
 
     for (photon p : ps.list) {
+      SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
       drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
       int x = 0;
       for (std::pair<float, float> pt : p.t.head) {
