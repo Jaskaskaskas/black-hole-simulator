@@ -12,6 +12,9 @@ inline float sign(float x) {
   return (x > 0.0f) ? 1.0f : ((x < 0.0f) ? -1.0f : 0.0f);
 }
 
+struct vec3 {
+  float x, y, z;
+};
 const float dlambda = 1.0f;
 struct trace {
   std::deque<std::pair<float, float>> head;
@@ -29,6 +32,7 @@ struct photon {
   float angle;
   float brightness = 0.0f;
   bool active;
+  vec3 u1, u2;
   trace t;
 };
 
@@ -49,10 +53,6 @@ struct blackhole {
 struct image {
   int width, height;
   std::vector<uint8_t> data;  // RGB format
-};
-
-struct vec3 {
-  float x, y, z;
 };
 
 int main(int argc, char* argv[]) {
@@ -88,72 +88,88 @@ int main(int argc, char* argv[]) {
   image img = {100, 100, std::vector<uint8_t>(img.width * img.height * 3, 20)};
 
   // The origin is at the center of the window
-  blackhole bh = {0.0f, 0.0f, 50.0f};
+  blackhole bh = {0.0f, 0.0f, 15.0f};
   accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 100.0f};
 
   float c = 1.0f;
   float angle = 0.0f * M_PI / 180.0f;
 
-  const float X = -250.0f;
-  const float Y = -200.0f;
-  const float Z = -200.0f;
-  const float dy = 3.0f;
-  const float dz = 3.0f;
+  const float X = -150.0f;
+  const float Y = -150.0f;
+  const float Z = -100.0f;
+  const float dy = 2.0f;
+  const float dz = 2.0f;
+
+  const float limit = 300.0f;
 
   photons ps;
   for (int x = 0; x < img.width; x++) {
     for (int y = 0; y < img.height; y++) {
-      photon p = {
-          x,   y, X, Y + y * dy, Z + x * dz, c * cosf(angle), c * sinf(-angle),
-          0.0f};
+      float startX = X;
+      float startY = Y + (y * dy);  // Adjust 5.0f to change spacing
+      float startZ = Z + (x * dz);
+
+      photon p = {};  // Zero initialize
+      p.idx = x;
+      p.idy = y;
+      p.x = startX;
+      p.y = startY;
+      p.z = startZ;
+
+      // Point them toward the Black Hole (positive X direction)
+      p.vx = 1.0f;
+      p.vy = 0.2f;
+      p.vz = 0.0f;
+
       ps.list.push_back(p);
-      // printf("Created photon at (%f, %f, %f)\n", p.x, p.y, p.z);
     }
   }
   for (photon& p : ps.list) {
-    printf("Initializing photon at (%f, %f, %f)\n", p.x, p.y, p.z);
-    // p.angle = M_PI / 2.0f;
-    printf("old location: (%f, %f, %f)\n", p.x, p.y, p.z);
+    // 1. Original 3D vectors
+    vec3 pos3D = {p.x, p.y, p.z};
+    vec3 vel3D = {p.vx, p.vy, p.vz};
+    vec3 L_vec = {pos3D.y * vel3D.z - pos3D.z * vel3D.y,
+                  pos3D.z * vel3D.x - pos3D.x * vel3D.z,
+                  pos3D.x * vel3D.y - pos3D.y * vel3D.x};
 
-    p.angle = atan2(p.y, p.z);
+    // 2. u1 is just the normalized starting position vector
+    float r_init =
+        sqrtf(pos3D.x * pos3D.x + pos3D.y * pos3D.y + pos3D.z * pos3D.z);
+    p.u1 = {pos3D.x / r_init, pos3D.y / r_init, pos3D.z / r_init};
 
-    float a = p.y * p.vz - p.z * p.vy;
-    float b = p.z * p.vx - p.x * p.vz;
-    float c = p.x * p.vy - p.y * p.vx;
-    float norm = sqrtf(a * a + b * b + c * c);
-    a /= norm;
-    b /= norm;
-    c /= norm;
+    // 3. u2 must be perpendicular to both L and u1 to complete the plane
+    // u2 = (L x u1) / |L x u1|
+    vec3 u2_raw = {L_vec.y * p.u1.z - L_vec.z * p.u1.y,
+                   L_vec.z * p.u1.x - L_vec.x * p.u1.z,
+                   L_vec.x * p.u1.y - L_vec.y * p.u1.x};
 
-    vec3 new_x_axis = {b, -a, 0.0f};
-    vec3 new_y_axis = {a * c, b * c, -(a * a + b * b)};
-    new_x_axis.x /=
-        sqrtf(new_x_axis.x * new_x_axis.x + new_x_axis.y * new_x_axis.y +
-              new_x_axis.z * new_x_axis.z);
-    new_x_axis.y /=
-        sqrtf(new_x_axis.x * new_x_axis.x + new_x_axis.y * new_x_axis.y +
-              new_x_axis.z * new_x_axis.z);
+    float u2_mag =
+        sqrtf(u2_raw.x * u2_raw.x + u2_raw.y * u2_raw.y + u2_raw.z * u2_raw.z);
+    if (u2_mag < 1e-6f) {
+      // Fallback for edge cases where pos and vel are parallel (straight into
+      // BH)
+      p.u2 = {0, 1, 0};
+    } else {
+      p.u2 = {u2_raw.x / u2_mag, u2_raw.y / u2_mag, u2_raw.z / u2_mag};
+    }
+    // 4. Project 3D position/velocity into 2D basis
 
-    float new_x = new_x_axis.x * p.x + new_x_axis.y * p.y + new_x_axis.z * p.z;
-    float new_y = new_y_axis.x * p.x + new_y_axis.y * p.y + new_y_axis.z * p.z;
+    p.x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
+    p.y = (pos3D.x * p.u2.x + pos3D.y * p.u2.y + pos3D.z * p.u2.z);
 
-    p.x = new_x;
-    p.y = new_y;
-    p.z = 0.0f;
-    p.vx = new_x_axis.x * p.vx;
-    p.vy = new_x_axis.y * p.vx;
+    float local_vx = (vel3D.x * p.u1.x + vel3D.y * p.u1.y + vel3D.z * p.u1.z);
+    float local_vy = (vel3D.x * p.u2.x + vel3D.y * p.u2.y + vel3D.z * p.u2.z);
 
-    printf("new location: (%f, %f, %f)\n", p.x, p.y, p.z);
-    printf("plane normal: (%f, %f, %f)\n", a, b, c);
+    p.vx = local_vx;
+    p.vy = local_vy;
+
+    // 5. Now calculate Polar coordinates
+    p.r = sqrtf(p.x * p.x + p.y * p.y);
+    p.phi = atan2f(p.y, p.x);
+    p.L = p.x * local_vy - p.y * local_vx;
 
     p.active = true;
     // printf("Photon angle: %f degrees\n", p.angle * 180.0f / M_PI);
-
-    p.r = hypotf(p.x, p.y);
-    // p.phi = acosf(p.x / sqrtf(p.x * p.x + p.y * p.y + p.z * p.z));
-    p.phi = atan2(p.y, p.x);
-
-    p.L = p.x * p.vy - p.y * p.vx;
     float speed = sqrtf(p.vx * p.vx + p.vy * p.vy);
     p.E = speed;
     p.b = p.L / p.E;
@@ -175,7 +191,7 @@ int main(int argc, char* argv[]) {
         if (e.key.keysym.sym == SDLK_ESCAPE) running = false;
       }
     }
-    // #pragma omp parallel for
+#pragma omp parallel for
     for (auto it = ps.list.begin(); it != ps.list.end();) {
       if (!it->active) {
         ++it;
@@ -183,38 +199,13 @@ int main(int argc, char* argv[]) {
       }
       photon& p = *it;
 
-      if (p.idx < 0 || p.idx >= img.width || p.idy < 0 || p.idy >= img.height) {
-        std::cerr << "Out of bounds: idx=" << p.idx << " idy=" << p.idy
-                  << std::endl;
-        p.active = false;
-        continue;
-      }
-
-      if (p.r > ad.inner_r && p.r < ad.outer_r) {
-        // Photon is in the accretion disk
-        if (p.angle != 0.0f) {
-          if (fabsf(fmodf(p.phi, M_PI)) < 10.0f / p.r) {
-            // printf("the value %f\n", fmodf(p.phi, M_PI));
-            p.brightness = ad.brightness;
-            img.data[3 * (img.width * p.idx + p.idy)] = std::min(
-                255, (int)(img.data[3 * (p.idx * img.width + p.idy) + 0] +
-                           (uint8_t)p.brightness));
-            // printf("Photon %d brightness increased to %f\n", p.idx *
-            // img.width + p.idy, p.brightness); it = ps.list.erase(it);
-            p.active = false;
-            // continue;
-          }
-        } else {
-          p.brightness = ad.brightness;
-          img.data[3 * (img.width * p.idx + p.idy)] = std::min(
-              255, (int)(img.data[3 * (p.idx * img.width + p.idy) + 0] +
-                         (uint8_t)p.brightness));
-          // printf("Photon %d brightness increased to %f\n",p.idx * img.width +
-          // p.idy, p.brightness); it = ps.list.erase(it);
-          p.active = false;
-          // continue;
-        }
-      }
+      // if (p.idx < 0 || p.idx >= img.width || p.idy < 0 || p.idy >=
+      // img.height) {
+      //   std::cerr << "Out of bounds: idx=" << p.idx << " idy=" << p.idy
+      //             << std::endl;
+      //   p.active = false;
+      //   continue;
+      // }
 
       if (p.r <= bh.sradius) {
         // Photon is within the black hole's Schwarzschild radius
@@ -230,18 +221,41 @@ int main(int argc, char* argv[]) {
       // }
       // printf("dr: %f, r: %f, phi: %f, b: %f\n", p.dr, p.r, p.phi, p.b);
 
-      float d2r = -bh.sradius / (2.0f * p.r * p.r) +
-                  (1.0f - bh.sradius / p.r) * p.L * p.L / (p.r * p.r * p.r);
+      float r2 = p.r * p.r;
+      float r3 = r2 * p.r;
 
-      // p.dt = 1.0f / (1.0f - bh.sradius / p.r);
-      p.dr += d2r * dlambda;  // Velocity evolves
-      p.r += p.dr * dlambda;  // Position evolves
+      float d2r =
+          (bh.sradius * p.L * p.L) / (r2 * r2) - (bh.sradius / (2 * r2));
+      // Note: This varies based on your choice of affine parameter λ.
 
-      p.dphi = p.L / (p.r * p.r);
-      p.phi += p.dphi * dlambda;
+      p.dr += d2r * dlambda;
+      p.r += p.dr * dlambda;
+      p.phi += (p.L / r2) * dlambda;
 
-      p.x = p.r * cosf(p.phi);
-      p.y = p.r * sinf(p.phi);
+      // 3. Transformation back to World Space for Disk Check
+      // You need to store your u1 and u2 basis vectors in the photon struct
+      float worldX = p.r * cosf(p.phi) * p.u1.x + p.r * sinf(p.phi) * p.u2.x;
+      float worldY = p.r * cosf(p.phi) * p.u1.y + p.r * sinf(p.phi) * p.u2.y;
+      float worldZ = p.r * cosf(p.phi) * p.u1.z + p.r * sinf(p.phi) * p.u2.z;
+
+      p.x = worldX;
+      p.y = worldY;
+      p.z = worldZ;
+
+      if (p.r > ad.inner_r && p.r < ad.outer_r) {
+        // Photon is in the accretion disk
+        if (fabs(p.y) < 0.1f) {  // Crossing the disk plane
+          // printf("the value %f\n", fmodf(p.phi, M_PI));
+          p.brightness = ad.brightness;
+          img.data[3 * (img.width * p.idx + p.idy)] = std::min(
+              255, (int)(img.data[3 * (p.idx * img.width + p.idy) + 0] +
+                         (uint8_t)p.brightness));
+          // printf("Photon %d brightness increased to %f\n", p.idx *
+          // img.width + p.idy, p.brightness); it = ps.list.erase(it);
+          p.active = false;
+          // continue;
+        }
+      }
 
       ++it;
     }
@@ -260,8 +274,12 @@ int main(int argc, char* argv[]) {
                        -(int)ad.outer_r + WIN_W / 2, WIN_H / 2);
 
     for (photon p : ps.list) {
-      // running = running && p.r < 1000.0f;
+      if (p.dr > 0.0f && p.r > limit) {
+        p.active = false;
+        continue;
+      }
       SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
+      // printf("Photon at (%f, %f) r=%f\n", p.x, p.y, p.r);
       drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
       int x = 0;
       for (std::pair<float, float> pt : p.t.head) {
@@ -274,10 +292,9 @@ int main(int argc, char* argv[]) {
 
     SDL_RenderPresent(ren);
 
-    SDL_Delay(16);  // ~60 FPS
-    // SDL_Delay(1);
+    // SDL_Delay(16);  // ~60 FPS
+    //  SDL_Delay(1);
   }
-
   for (int x = 0; x < img.width; x++) {
     for (int y = 0; y < img.height; y++) {
       printf("%d ", (int)img.data[3 * (x * img.width + y)]);
