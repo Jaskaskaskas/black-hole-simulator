@@ -20,7 +20,7 @@ struct trace {
 struct photon {
   int idx, idy;
   float x, y, z;
-  float vx, vy;
+  float vx, vy, vz;
   float r, phi;
   float dr, dphi;
   float L, E;
@@ -49,6 +49,10 @@ struct blackhole {
 struct image {
   int width, height;
   std::vector<uint8_t> data;  // RGB format
+};
+
+struct vec3 {
+  float x, y, z;
 };
 
 int main(int argc, char* argv[]) {
@@ -88,19 +92,20 @@ int main(int argc, char* argv[]) {
   accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 100.0f};
 
   float c = 1.0f;
-  float angle = -45.0f * M_PI / 180.0f;
+  float angle = 0.0f * M_PI / 180.0f;
 
-  const float X = -100.0f;
-  const float Y = -250.0f;
-  const float Z = -250.0f;
-  const float dy = 5.0f;
-  const float dz = 5.0f;
+  const float X = -250.0f;
+  const float Y = -200.0f;
+  const float Z = -200.0f;
+  const float dy = 3.0f;
+  const float dz = 3.0f;
 
   photons ps;
   for (int x = 0; x < img.width; x++) {
     for (int y = 0; y < img.height; y++) {
       photon p = {
-          x, y, X, Y + y * dy, Z + x * dz, c * cosf(angle), c * sinf(-angle)};
+          x,   y, X, Y + y * dy, Z + x * dz, c * cosf(angle), c * sinf(-angle),
+          0.0f};
       ps.list.push_back(p);
       // printf("Created photon at (%f, %f, %f)\n", p.x, p.y, p.z);
     }
@@ -108,10 +113,40 @@ int main(int argc, char* argv[]) {
   for (photon& p : ps.list) {
     printf("Initializing photon at (%f, %f, %f)\n", p.x, p.y, p.z);
     // p.angle = M_PI / 2.0f;
-    p.active = true;
-    p.y = hypotf(p.y, p.z);
+    printf("old location: (%f, %f, %f)\n", p.x, p.y, p.z);
 
     p.angle = atan2(p.y, p.z);
+
+    float a = p.y * p.vz - p.z * p.vy;
+    float b = p.z * p.vx - p.x * p.vz;
+    float c = p.x * p.vy - p.y * p.vx;
+    float norm = sqrtf(a * a + b * b + c * c);
+    a /= norm;
+    b /= norm;
+    c /= norm;
+
+    vec3 new_x_axis = {b, -a, 0.0f};
+    vec3 new_y_axis = {a * c, b * c, -(a * a + b * b)};
+    new_x_axis.x /=
+        sqrtf(new_x_axis.x * new_x_axis.x + new_x_axis.y * new_x_axis.y +
+              new_x_axis.z * new_x_axis.z);
+    new_x_axis.y /=
+        sqrtf(new_x_axis.x * new_x_axis.x + new_x_axis.y * new_x_axis.y +
+              new_x_axis.z * new_x_axis.z);
+
+    float new_x = new_x_axis.x * p.x + new_x_axis.y * p.y + new_x_axis.z * p.z;
+    float new_y = new_y_axis.x * p.x + new_y_axis.y * p.y + new_y_axis.z * p.z;
+
+    p.x = new_x;
+    p.y = new_y;
+    p.z = 0.0f;
+    p.vx = new_x_axis.x * p.vx;
+    p.vy = new_x_axis.y * p.vx;
+
+    printf("new location: (%f, %f, %f)\n", p.x, p.y, p.z);
+    printf("plane normal: (%f, %f, %f)\n", a, b, c);
+
+    p.active = true;
     // printf("Photon angle: %f degrees\n", p.angle * 180.0f / M_PI);
 
     p.r = hypotf(p.x, p.y);
@@ -140,13 +175,21 @@ int main(int argc, char* argv[]) {
         if (e.key.keysym.sym == SDLK_ESCAPE) running = false;
       }
     }
-#pragma omp parallel for
+    // #pragma omp parallel for
     for (auto it = ps.list.begin(); it != ps.list.end();) {
       if (!it->active) {
         ++it;
         continue;
       }
       photon& p = *it;
+
+      if (p.idx < 0 || p.idx >= img.width || p.idy < 0 || p.idy >= img.height) {
+        std::cerr << "Out of bounds: idx=" << p.idx << " idy=" << p.idy
+                  << std::endl;
+        p.active = false;
+        continue;
+      }
+
       if (p.r > ad.inner_r && p.r < ad.outer_r) {
         // Photon is in the accretion disk
         if (p.angle != 0.0f) {
@@ -159,7 +202,6 @@ int main(int argc, char* argv[]) {
             // printf("Photon %d brightness increased to %f\n", p.idx *
             // img.width + p.idy, p.brightness); it = ps.list.erase(it);
             p.active = false;
-            ++it;
             // continue;
           }
         } else {
@@ -170,7 +212,6 @@ int main(int argc, char* argv[]) {
           // printf("Photon %d brightness increased to %f\n",p.idx * img.width +
           // p.idy, p.brightness); it = ps.list.erase(it);
           p.active = false;
-          ++it;
           // continue;
         }
       }
@@ -181,7 +222,6 @@ int main(int argc, char* argv[]) {
         img.data[3 * (img.width * p.idx + p.idy)] = p.brightness;
         // it = ps.list.erase(it);
         p.active = false;
-        ++it;
         // continue;
       }
       // p.t.head.push_front(std::make_pair(p.x, p.y));
@@ -220,7 +260,7 @@ int main(int argc, char* argv[]) {
                        -(int)ad.outer_r + WIN_W / 2, WIN_H / 2);
 
     for (photon p : ps.list) {
-      running = running && p.r < 1000.0f;
+      // running = running && p.r < 1000.0f;
       SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
       drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
       int x = 0;
@@ -234,7 +274,7 @@ int main(int argc, char* argv[]) {
 
     SDL_RenderPresent(ren);
 
-    // SDL_Delay(16);  // ~60 FPS
+    SDL_Delay(16);  // ~60 FPS
     // SDL_Delay(1);
   }
 
