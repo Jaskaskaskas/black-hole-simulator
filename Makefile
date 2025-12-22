@@ -6,7 +6,7 @@ OUT = bh
 .PHONY: build run clean
 
 build:
-	$(CC) $(shell $(PKG_CONFIG) --cflags sdl2) $(SRC) -o $(OUT) $(shell $(PKG_CONFIG) --libs sdl2)
+	$(CC) -fopenmp $(shell $(PKG_CONFIG) --cflags sdl2) $(SRC) -o $(OUT) $(shell $(PKG_CONFIG) --libs sdl2) -fopenmp
 
 run: build
 	./$(OUT)

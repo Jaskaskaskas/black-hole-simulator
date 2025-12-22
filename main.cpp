@@ -1,4 +1,5 @@
 #include <SDL2/SDL.h>
+#include <omp.h>
 
 #include <algorithm>
 #include <cmath>
@@ -15,7 +16,10 @@ inline float sign(float x) {
 struct vec3 {
   float x, y, z;
 };
-const float dlambda = 1.0f;
+const float dlambda = 0.1f;  // Smaller values yield more accurate results but
+                             // take longer
+const int render =
+    0;  // set to 1 enables rendering, 0 disables rendering for faster execution
 struct trace {
   std::deque<std::pair<float, float>> head;
   size_t max_length = 255;
@@ -50,12 +54,9 @@ struct blackhole {
   float sradius;
 };
 
-struct image {
-  int width, height;
-  std::vector<uint8_t> data;  // RGB format
-};
-
 int main(int argc, char* argv[]) {
+  printf("Number of threads: %d\n", omp_get_max_threads());
+
   if (SDL_Init(SDL_INIT_VIDEO) != 0) {
     std::cerr << "SDL_Init Error: " << SDL_GetError() << std::endl;
     return 1;
@@ -85,20 +86,21 @@ int main(int argc, char* argv[]) {
   bool running = true;
   SDL_Event e;
 
-  image img = {100, 100, std::vector<uint8_t>(img.width * img.height * 3, 20)};
+  image img = {1000, 1000,
+               std::vector<uint8_t>(img.width * img.height * 3, 50)};
 
   // The origin is at the center of the window
   blackhole bh = {0.0f, 0.0f, 15.0f};
-  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 100.0f};
+  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 100.0f};  // 190
 
   float c = 1.0f;
   float angle = 0.0f * M_PI / 180.0f;
 
-  const float X = -150.0f;
+  const float X = -250.0f;
   const float Y = -150.0f;
   const float Z = -100.0f;
-  const float dy = 2.0f;
-  const float dz = 2.0f;
+  const float dy = 0.2f;
+  const float dz = 0.2f;
 
   const float limit = 300.0f;
 
@@ -133,6 +135,7 @@ int main(int argc, char* argv[]) {
                   pos3D.x * vel3D.y - pos3D.y * vel3D.x};
 
     // 2. u1 is just the normalized starting position vector
+
     float r_init =
         sqrtf(pos3D.x * pos3D.x + pos3D.y * pos3D.y + pos3D.z * pos3D.z);
     p.u1 = {pos3D.x / r_init, pos3D.y / r_init, pos3D.z / r_init};
@@ -152,6 +155,7 @@ int main(int argc, char* argv[]) {
     } else {
       p.u2 = {u2_raw.x / u2_mag, u2_raw.y / u2_mag, u2_raw.z / u2_mag};
     }
+
     // 4. Project 3D position/velocity into 2D basis
 
     p.x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
@@ -185,6 +189,12 @@ int main(int argc, char* argv[]) {
   }
 
   while (running) {
+    bool any_active = false;
+    for (photon& p : ps.list) {
+      any_active = any_active || p.active;
+    }
+    running = any_active;
+
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_QUIT) running = false;
       if (e.type == SDL_KEYDOWN) {
@@ -192,117 +202,102 @@ int main(int argc, char* argv[]) {
       }
     }
 #pragma omp parallel for
-    for (auto it = ps.list.begin(); it != ps.list.end();) {
-      if (!it->active) {
-        ++it;
-        continue;
-      }
-      photon& p = *it;
-
-      // if (p.idx < 0 || p.idx >= img.width || p.idy < 0 || p.idy >=
-      // img.height) {
-      //   std::cerr << "Out of bounds: idx=" << p.idx << " idy=" << p.idy
-      //             << std::endl;
-      //   p.active = false;
-      //   continue;
-      // }
+    for (size_t i = 0; i < ps.list.size(); i++) {
+      photon& p = ps.list[i];
+      if (!p.active) continue;
 
       if (p.r <= bh.sradius) {
         // Photon is within the black hole's Schwarzschild radius
-        // std::cout << "Photon absorbed by black hole!" << std::endl;
-        img.data[3 * (img.width * p.idx + p.idy)] = p.brightness;
-        // it = ps.list.erase(it);
+        img.data[3 * (img.width * p.idy + p.idx)] = p.brightness;
         p.active = false;
-        // continue;
       }
-      // p.t.head.push_front(std::make_pair(p.x, p.y));
-      // if (p.t.head.size() > p.t.max_length) {
-      //   p.t.head.pop_back();
-      // }
-      // printf("dr: %f, r: %f, phi: %f, b: %f\n", p.dr, p.r, p.phi, p.b);
 
       float r2 = p.r * p.r;
       float r3 = r2 * p.r;
 
       float d2r =
           (bh.sradius * p.L * p.L) / (r2 * r2) - (bh.sradius / (2 * r2));
-      // Note: This varies based on your choice of affine parameter λ.
 
       p.dr += d2r * dlambda;
       p.r += p.dr * dlambda;
       p.phi += (p.L / r2) * dlambda;
 
-      // 3. Transformation back to World Space for Disk Check
-      // You need to store your u1 and u2 basis vectors in the photon struct
+      // Calculate global coordinates from local coordinates
       float worldX = p.r * cosf(p.phi) * p.u1.x + p.r * sinf(p.phi) * p.u2.x;
       float worldY = p.r * cosf(p.phi) * p.u1.y + p.r * sinf(p.phi) * p.u2.y;
       float worldZ = p.r * cosf(p.phi) * p.u1.z + p.r * sinf(p.phi) * p.u2.z;
+
+      float old_y = p.y;
 
       p.x = worldX;
       p.y = worldY;
       p.z = worldZ;
 
-      if (p.r > ad.inner_r && p.r < ad.outer_r) {
-        // Photon is in the accretion disk
-        if (fabs(p.y) < 0.1f) {  // Crossing the disk plane
-          // printf("the value %f\n", fmodf(p.phi, M_PI));
-          p.brightness = ad.brightness;
-          img.data[3 * (img.width * p.idx + p.idy)] = std::min(
-              255, (int)(img.data[3 * (p.idx * img.width + p.idy) + 0] +
-                         (uint8_t)p.brightness));
-          // printf("Photon %d brightness increased to %f\n", p.idx *
-          // img.width + p.idy, p.brightness); it = ps.list.erase(it);
-          p.active = false;
-          // continue;
-        }
-      }
-
-      ++it;
-    }
-
-    // SDL_SetRenderDrawColor(ren, 10, 24, 74, 255);
-    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
-    SDL_RenderClear(ren);
-    // Draw photon
-    SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
-
-    drawCircle(ren, bh.x + WIN_W / 2, bh.y + WIN_H / 2, bh.sradius);
-    SDL_RenderDrawLine(ren, (int)ad.inner_r + WIN_W / 2, 0 + WIN_H / 2,
-                       (int)ad.outer_r + WIN_W / 2, WIN_H / 2);
-
-    SDL_RenderDrawLine(ren, -(int)ad.inner_r + WIN_W / 2, 0 + WIN_H / 2,
-                       -(int)ad.outer_r + WIN_W / 2, WIN_H / 2);
-
-    for (photon p : ps.list) {
       if (p.dr > 0.0f && p.r > limit) {
         p.active = false;
         continue;
       }
-      SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
-      // printf("Photon at (%f, %f) r=%f\n", p.x, p.y, p.r);
-      drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
-      int x = 0;
-      for (std::pair<float, float> pt : p.t.head) {
-        int alpha = std::max(0, 255 - x);
-        SDL_SetRenderDrawColor(ren, alpha, 0, 0, 255);
-        drawCircle(ren, pt.first + WIN_W / 2, pt.second + WIN_H / 2, 3);
-        x++;
+      if (p.r > ad.inner_r && p.r < ad.outer_r) {
+        // Photon has the correct distance to be in the accretion disk
+        if ((old_y < 0.0f && p.y >= 0.0f) ||
+            (old_y > 0.0f &&
+             p.y <= 0.0f)) {  // The accretion disk is on the xz-plane, where
+                              // y=0. Thus crossing y=0 means crossing the disk
+          // float temperature = ad.brightness * (ad.outer_r / (p.r +
+          // ad.inner_r));
+          float temperature =
+              (-(p.r - ad.inner_r) / (ad.outer_r - ad.inner_r) + 1) *
+              ad.brightness;
+          p.brightness += temperature;
+
+          img.data[3 * (img.width * p.idy + p.idx)] = std::min(
+              img.data[3 * (img.width * p.idy + p.idx)] + temperature, 255.0f);
+        }
       }
     }
+    if (render) {
+      SDL_SetRenderDrawColor(ren, 10, 24, 74, 255);
+      // SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+      SDL_RenderClear(ren);
+      // // Draw photon
+      SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
 
-    SDL_RenderPresent(ren);
+      drawCircle(ren, bh.x + WIN_W / 2, bh.y + WIN_H / 2, bh.sradius);
+      SDL_RenderDrawLine(ren, (int)ad.inner_r + WIN_W / 2, 0 + WIN_H / 2,
+                         (int)ad.outer_r + WIN_W / 2, WIN_H / 2);
 
-    // SDL_Delay(16);  // ~60 FPS
-    //  SDL_Delay(1);
-  }
-  for (int x = 0; x < img.width; x++) {
-    for (int y = 0; y < img.height; y++) {
-      printf("%d ", (int)img.data[3 * (x * img.width + y)]);
-      // printf("x: %d y: %d value: %d | \n", x, y,
-      //        (int)img.data[3 * (y * img.width + x)]);
+      SDL_RenderDrawLine(ren, -(int)ad.inner_r + WIN_W / 2, 0 + WIN_H / 2,
+                         -(int)ad.outer_r + WIN_W / 2, WIN_H / 2);
+
+      for (photon p : ps.list) {
+        SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
+        // printf("Photon at (%f, %f) r=%f\n", p.x, p.y, p.r);
+        drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
+        int x = 0;
+        for (std::pair<float, float> pt : p.t.head) {
+          int alpha = std::max(0, 255 - x);
+          SDL_SetRenderDrawColor(ren, alpha, 0, 0, 255);
+          drawCircle(ren, pt.first + WIN_W / 2, pt.second + WIN_H / 2, 3);
+          x++;
+        }
+      }
+
+      SDL_RenderPresent(ren);
+
+      // SDL_Delay(16);  // ~60 FPS
+      // SDL_Delay(1);
     }
-    printf("\n");
   }
+  // for (int x = 0; x < img.width; x++) {
+  //   for (int y = 0; y < img.height; y++) {
+  //     printf("%d ", (int)img.data[3 * (x * img.width + y)]);
+  //     // printf("x: %d y: %d value: %d | \n", x, y,
+  //     //        (int)img.data[3 * (y * img.width + x)]);
+  //   }
+  //   printf("\n");
+  // }
+
+  save_ppm(img, "output.ppm");
 
   SDL_DestroyRenderer(ren);
   SDL_DestroyWindow(win);

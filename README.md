@@ -1,6 +1,6 @@
-# SDL2 Simple Graphics Example
+# Black hole simulator
 
-This repository contains a minimal SDL2 example in `main.cpp` that opens a window and draws a moving rectangle.
+This repository contains a simple black hole renderer. Currently the code produces a picture of a black hole controlled by the parameters in code.
 
 Prerequisites (Debian/Ubuntu):
 

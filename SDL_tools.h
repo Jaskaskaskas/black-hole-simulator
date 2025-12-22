@@ -3,7 +3,15 @@
 
 #include <SDL2/SDL.h>
 
+#include <iostream>
+
+struct image {
+  int width, height;
+  std::vector<uint8_t> data;  // RGB format
+};
+
 void drawCircle(SDL_Renderer* renderer, int32_t cx, int32_t cy, int32_t radius);
+void save_ppm(const struct image& img, const char* filename);
 
 #endif
 void drawCircle(SDL_Renderer* renderer, int32_t cx, int32_t cy,
@@ -30,4 +38,21 @@ void drawCircle(SDL_Renderer* renderer, int32_t cx, int32_t cy,
       err += 2 * (y - x) + 1;
     }
   }
+}
+
+void save_ppm(const image& img, const char* filename) {
+  FILE* f = fopen(filename, "wb");
+  if (!f) {
+    std::cerr << "Error opening file: " << filename << std::endl;
+    return;
+  }
+
+  // Write PPM header
+  fprintf(f, "P6\n%d %d\n255\n", img.width, img.height);
+
+  // Write pixel data (assuming RGB format)
+  fwrite(img.data.data(), 1, img.width * img.height * 3, f);
+
+  fclose(f);
+  std::cout << "Saved image to " << filename << std::endl;
 }
