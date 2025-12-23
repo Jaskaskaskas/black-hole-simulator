@@ -9,14 +9,35 @@
 
 #include "SDL_tools.h"
 
-inline float sign(float x) {
-  return (x > 0.0f) ? 1.0f : ((x < 0.0f) ? -1.0f : 0.0f);
+float pos_to_brightness(float x, float z, float r, float inner_r, float outer_r,
+                        float max_brightness) {
+  float angle = atan2f(z, x);
+  float curve = -(r - inner_r) * (r - outer_r);
+  curve /= ((outer_r - inner_r) / 2.0f) * ((outer_r - inner_r) / 2.0f);
+  float norm_r = (r - inner_r) / (outer_r) + 1;
+  norm_r *= sinf((r - inner_r) / (outer_r - inner_r) * 2.0f * M_PI);
+  return max_brightness * curve * (1.0f - norm_r) *
+         (0.5f + 0.5f * (cosf(4.0f * angle + 3.0f * norm_r) + 0.6f));
 }
 
+float pos_to_brightness2(float x, float z, float r, float inner_r,
+                         float outer_r, float max_brightness) {
+  float angle = atan2f(z, x);
+  float norm_r = (r - inner_r) / (outer_r);
+  return max_brightness * norm_r;
+}
+
+float pos_to_brightness3(float x, float z, float r, float inner_r,
+                         float outer_r, float max_brightness) {
+  float curve = -(r - inner_r) * (r - outer_r);
+  curve /= ((outer_r - inner_r) / 2.0f) * ((outer_r - inner_r) / 2.0f);
+  return max_brightness * curve;
+  // return 50;
+}
 struct vec3 {
   float x, y, z;
 };
-const float dlambda = 0.1f;  // Smaller values yield more accurate results but
+const float dlambda = 0.2f;  // Smaller values yield more accurate results but
                              // take longer
 const int render =
     0;  // set to 1 enables rendering, 0 disables rendering for faster execution
@@ -87,16 +108,16 @@ int main(int argc, char* argv[]) {
   SDL_Event e;
 
   image img = {1000, 1000,
-               std::vector<uint8_t>(img.width * img.height * 3, 50)};
+               std::vector<float>(img.width * img.height * 3, 0.0f)};
 
   // The origin is at the center of the window
-  blackhole bh = {0.0f, 0.0f, 15.0f};
-  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 100.0f};  // 190
+  blackhole bh = {0.0f, 0.0f, 5.0f};
+  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 5.0f, 80.0f};  // 190
 
   float c = 1.0f;
   float angle = 0.0f * M_PI / 180.0f;
 
-  const float X = -250.0f;
+  const float X = -700.0f;
   const float Y = -150.0f;
   const float Z = -100.0f;
   const float dy = 0.2f;
@@ -120,7 +141,7 @@ int main(int argc, char* argv[]) {
 
       // Point them toward the Black Hole (positive X direction)
       p.vx = 1.0f;
-      p.vy = 0.2f;
+      p.vy = 0.05f;
       p.vz = 0.0f;
 
       ps.list.push_back(p);
@@ -206,12 +227,6 @@ int main(int argc, char* argv[]) {
       photon& p = ps.list[i];
       if (!p.active) continue;
 
-      if (p.r <= bh.sradius) {
-        // Photon is within the black hole's Schwarzschild radius
-        img.data[3 * (img.width * p.idy + p.idx)] = p.brightness;
-        p.active = false;
-      }
-
       float r2 = p.r * p.r;
       float r3 = r2 * p.r;
 
@@ -234,24 +249,31 @@ int main(int argc, char* argv[]) {
       p.z = worldZ;
 
       if (p.dr > 0.0f && p.r > limit) {
+        float background_brightness = 20.0f;  // background brightness
+        img.data[3 * (img.width * p.idy + p.idx)] =
+            img.data[3 * (img.width * p.idy + p.idx)] + background_brightness;
         p.active = false;
         continue;
       }
+
+      if (p.r <= bh.sradius) {
+        // Photon is within the black hole's Schwarzschild radius
+        // img.data[3 * (img.width * p.idy + p.idx)] = p.brightness;
+        p.active = false;
+      }
+
       if (p.r > ad.inner_r && p.r < ad.outer_r) {
         // Photon has the correct distance to be in the accretion disk
-        if ((old_y < 0.0f && p.y >= 0.0f) ||
-            (old_y > 0.0f &&
-             p.y <= 0.0f)) {  // The accretion disk is on the xz-plane, where
-                              // y=0. Thus crossing y=0 means crossing the disk
-          // float temperature = ad.brightness * (ad.outer_r / (p.r +
-          // ad.inner_r));
-          float temperature =
-              (-(p.r - ad.inner_r) / (ad.outer_r - ad.inner_r) + 1) *
-              ad.brightness;
-          p.brightness += temperature;
-
-          img.data[3 * (img.width * p.idy + p.idx)] = std::min(
-              img.data[3 * (img.width * p.idy + p.idx)] + temperature, 255.0f);
+        // if ((old_y < 0.0f && p.y >= 0.0f) ||
+        //    (old_y > 0.0f &&
+        //     p.y <= 0.0f)) {  // The accretion disk is on the xz-plane, where
+        // y = 0. Thus crossing y = 0 means crossing the disk
+        if (p.y <= 5.0f && p.y >= -5.0f) {  // Thin disk approximation
+          float temperature = pos_to_brightness(p.x, p.z, p.r, ad.inner_r,
+                                                ad.outer_r, ad.brightness);
+          img.data[3 * (img.width * p.idy + p.idx)] =
+              img.data[3 * (img.width * p.idy + p.idx)] + temperature;
+          // p.active = false;
         }
       }
     }
@@ -271,7 +293,6 @@ int main(int argc, char* argv[]) {
 
       for (photon p : ps.list) {
         SDL_SetRenderDrawColor(ren, 255, 0, 0, 255);
-        // printf("Photon at (%f, %f) r=%f\n", p.x, p.y, p.r);
         drawCircle(ren, p.x + WIN_W / 2, p.y + WIN_H / 2, 10);
         int x = 0;
         for (std::pair<float, float> pt : p.t.head) {
@@ -288,16 +309,26 @@ int main(int argc, char* argv[]) {
       // SDL_Delay(1);
     }
   }
-  // for (int x = 0; x < img.width; x++) {
-  //   for (int y = 0; y < img.height; y++) {
-  //     printf("%d ", (int)img.data[3 * (x * img.width + y)]);
-  //     // printf("x: %d y: %d value: %d | \n", x, y,
-  //     //        (int)img.data[3 * (y * img.width + x)]);
-  //   }
-  //   printf("\n");
-  // }
 
-  save_ppm(img, "output.ppm");
+  image balance_img = {img.width, img.height,
+                       std::vector<float>(img.width * img.height * 3, 0)};
+
+  float max = img.data[0];
+  float min = img.data[0];
+  for (size_t i = 0; i < img.data.size(); i += 3) {
+    if (img.data[i] > max) max = img.data[i];
+    if (img.data[i] < min) min = img.data[i];
+  }
+  float dif = max - min;
+  for (size_t i = 0; i < img.data.size(); i += 3) {
+    float norm = (img.data[i] - min) / dif;
+    uint8_t val = static_cast<uint>(norm * 255.0f);
+    balance_img.data[i] = val;
+    balance_img.data[i + 1] = val;
+    balance_img.data[i + 2] = val;
+  }
+
+  save_ppm(balance_img, "output.ppm");
 
   SDL_DestroyRenderer(ren);
   SDL_DestroyWindow(win);
