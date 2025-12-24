@@ -41,6 +41,8 @@ const float dlambda = 0.2f;  // Smaller values yield more accurate results but
                              // take longer
 const int render =
     0;  // set to 1 enables rendering, 0 disables rendering for faster execution
+const int relativity =
+    1;  // set to 1 enables relativistic effects, 0 disables them
 struct trace {
   std::deque<std::pair<float, float>> head;
   size_t max_length = 255;
@@ -111,19 +113,19 @@ int main(int argc, char* argv[]) {
                std::vector<float>(img.width * img.height * 3, 0.0f)};
 
   // The origin is at the center of the window
-  blackhole bh = {0.0f, 0.0f, 5.0f};
-  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 5.0f, 80.0f};  // 190
+  blackhole bh = {0.0f, 0.0f, 15.0f};
+  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 80.0f};  // 190
 
   float c = 1.0f;
   float angle = 0.0f * M_PI / 180.0f;
 
-  const float X = -700.0f;
+  const float X = -250.0f;
   const float Y = -150.0f;
   const float Z = -100.0f;
   const float dy = 0.2f;
   const float dz = 0.2f;
 
-  const float limit = 300.0f;
+  const float limit = sqrtf(X * X + Y * Y + Z * Z);
 
   photons ps;
   for (int x = 0; x < img.width; x++) {
@@ -141,7 +143,7 @@ int main(int argc, char* argv[]) {
 
       // Point them toward the Black Hole (positive X direction)
       p.vx = 1.0f;
-      p.vy = 0.05f;
+      p.vy = 0.2f;
       p.vz = 0.0f;
 
       ps.list.push_back(p);
@@ -179,27 +181,30 @@ int main(int argc, char* argv[]) {
 
     // 4. Project 3D position/velocity into 2D basis
 
-    p.x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
-    p.y = (pos3D.x * p.u2.x + pos3D.y * p.u2.y + pos3D.z * p.u2.z);
+    // p.x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
+    // p.y = (pos3D.x * p.u2.x + pos3D.y * p.u2.y + pos3D.z * p.u2.z);
+
+    float local_x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
+    float local_y = (pos3D.x * p.u2.x + pos3D.y * p.u2.y + pos3D.z * p.u2.z);
 
     float local_vx = (vel3D.x * p.u1.x + vel3D.y * p.u1.y + vel3D.z * p.u1.z);
     float local_vy = (vel3D.x * p.u2.x + vel3D.y * p.u2.y + vel3D.z * p.u2.z);
 
-    p.vx = local_vx;
-    p.vy = local_vy;
+    // p.vx = local_vx;
+    // p.vy = local_vy;
 
     // 5. Now calculate Polar coordinates
-    p.r = sqrtf(p.x * p.x + p.y * p.y);
-    p.phi = atan2f(p.y, p.x);
-    p.L = p.x * local_vy - p.y * local_vx;
+    p.r = sqrtf(local_x * local_x + local_y * local_y);
+    p.phi = atan2f(local_y, local_x);
+    p.L = local_x * local_vy - local_y * local_vx;
 
     p.active = true;
     // printf("Photon angle: %f degrees\n", p.angle * 180.0f / M_PI);
-    float speed = sqrtf(p.vx * p.vx + p.vy * p.vy);
+    float speed = sqrtf(local_vx * local_vx + local_vy * local_vy);
     p.E = speed;
     p.b = p.L / p.E;
 
-    float vr = (p.x * p.vx + p.y * p.vy) / p.r;
+    float vr = (local_x * local_vx + local_y * local_vy) / p.r;
     float dr_mag = sqrtf(std::max(
         0.0f, 1.0f - (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r))));
 
@@ -227,29 +232,40 @@ int main(int argc, char* argv[]) {
       photon& p = ps.list[i];
       if (!p.active) continue;
 
-      float r2 = p.r * p.r;
-      float r3 = r2 * p.r;
+      if (relativity) {
+        float r2 = p.r * p.r;
+        float r3 = r2 * p.r;
 
-      float d2r =
-          (bh.sradius * p.L * p.L) / (r2 * r2) - (bh.sradius / (2 * r2));
+        float d2r =
+            (bh.sradius * p.L * p.L) / (r2 * r2) - (bh.sradius / (2 * r2));
 
-      p.dr += d2r * dlambda;
-      p.r += p.dr * dlambda;
-      p.phi += (p.L / r2) * dlambda;
+        p.dr += d2r * dlambda;
+        p.r += p.dr * dlambda;
+        p.phi += (p.L / r2) * dlambda;
 
-      // Calculate global coordinates from local coordinates
-      float worldX = p.r * cosf(p.phi) * p.u1.x + p.r * sinf(p.phi) * p.u2.x;
-      float worldY = p.r * cosf(p.phi) * p.u1.y + p.r * sinf(p.phi) * p.u2.y;
-      float worldZ = p.r * cosf(p.phi) * p.u1.z + p.r * sinf(p.phi) * p.u2.z;
+        // Calculate global coordinates from local coordinates
+        float worldX = p.r * cosf(p.phi) * p.u1.x + p.r * sinf(p.phi) * p.u2.x;
+        float worldY = p.r * cosf(p.phi) * p.u1.y + p.r * sinf(p.phi) * p.u2.y;
+        float worldZ = p.r * cosf(p.phi) * p.u1.z + p.r * sinf(p.phi) * p.u2.z;
 
-      float old_y = p.y;
+        float old_y = p.y;
 
-      p.x = worldX;
-      p.y = worldY;
-      p.z = worldZ;
+        p.x = worldX;
+        p.y = worldY;
+        p.z = worldZ;
+      } else {
+        // Non-relativistic initialization
+        float old_r = p.r;
+        p.x += p.vx;
+        p.y += p.vy;
+        p.z += p.vz;
+        p.r = sqrtf(p.x * p.x + p.y * p.y + p.z * p.z);
+        p.dr = p.r - old_r;
+      }
 
       if (p.dr > 0.0f && p.r > limit) {
-        float background_brightness = 20.0f;  // background brightness
+        // float background_brightness = -99.0f;  // background brightness
+        float background_brightness = 1000.0f;  // background brightness
         img.data[3 * (img.width * p.idy + p.idx)] =
             img.data[3 * (img.width * p.idy + p.idx)] + background_brightness;
         p.active = false;
@@ -268,7 +284,8 @@ int main(int argc, char* argv[]) {
         //    (old_y > 0.0f &&
         //     p.y <= 0.0f)) {  // The accretion disk is on the xz-plane, where
         // y = 0. Thus crossing y = 0 means crossing the disk
-        if (p.y <= 5.0f && p.y >= -5.0f) {  // Thin disk approximation
+        if (p.y <= 2.0f && p.y >= -2.0f) {  // Thin disk approximation
+          // TODO: add opaque parts to the disk (could be very non-trivial)
           float temperature = pos_to_brightness(p.x, p.z, p.r, ad.inner_r,
                                                 ad.outer_r, ad.brightness);
           img.data[3 * (img.width * p.idy + p.idx)] =
@@ -320,12 +337,20 @@ int main(int argc, char* argv[]) {
     if (img.data[i] < min) min = img.data[i];
   }
   float dif = max - min;
+  printf("Image max: %f min: %f\n", max, min);
   for (size_t i = 0; i < img.data.size(); i += 3) {
-    float norm = (img.data[i] - min) / dif;
-    uint8_t val = static_cast<uint>(norm * 255.0f);
-    balance_img.data[i] = val;
-    balance_img.data[i + 1] = val;
-    balance_img.data[i + 2] = val;
+    if (img.data[i] == -99.0f) {
+      uint8_t value = static_cast<uint>(log2((dif) / 2) * 0.0f);
+      balance_img.data[i] = value;
+      balance_img.data[i + 1] = value;
+      balance_img.data[i + 2] = value;
+    } else {
+      float norm = log2(((img.data[i] - min) / dif) + 1);
+      uint8_t val = static_cast<uint>(norm * 255.0f);
+      balance_img.data[i] = val;
+      balance_img.data[i + 1] = val;
+      balance_img.data[i + 2] = val;
+    }
   }
 
   save_ppm(balance_img, "output.ppm");
