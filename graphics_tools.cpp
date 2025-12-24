@@ -1,19 +1,5 @@
-#ifndef SDL_TOOLS_H
-#define SDL_TOOLS_H
+#include "graphics_tools.h"
 
-#include <SDL2/SDL.h>
-
-#include <iostream>
-
-struct image {
-  int width, height;
-  std::vector<float> data;  // RGB format
-};
-
-void drawCircle(SDL_Renderer* renderer, int32_t cx, int32_t cy, int32_t radius);
-void save_ppm(const struct image& img, const char* filename);
-
-#endif
 void drawCircle(SDL_Renderer* renderer, int32_t cx, int32_t cy,
                 int32_t radius) {
   int32_t x = radius - 1;

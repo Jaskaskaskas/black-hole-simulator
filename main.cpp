@@ -2,80 +2,18 @@
 #include <omp.h>
 
 #include <algorithm>
-#include <cmath>
-#include <deque>
 #include <iostream>
 #include <vector>
 
-#include "SDL_tools.h"
+#include "graphics_tools.h"
+#include "physics.h"
 
-float pos_to_brightness(float x, float z, float r, float inner_r, float outer_r,
-                        float max_brightness) {
-  float angle = atan2f(z, x);
-  float curve = -(r - inner_r) * (r - outer_r);
-  curve /= ((outer_r - inner_r) / 2.0f) * ((outer_r - inner_r) / 2.0f);
-  float norm_r = (r - inner_r) / (outer_r) + 1;
-  norm_r *= sinf((r - inner_r) / (outer_r - inner_r) * 2.0f * M_PI);
-  return max_brightness * curve * (1.0f - norm_r) *
-         (0.5f + 0.5f * (cosf(4.0f * angle + 3.0f * norm_r) + 0.6f));
-}
-
-float pos_to_brightness2(float x, float z, float r, float inner_r,
-                         float outer_r, float max_brightness) {
-  float angle = atan2f(z, x);
-  float norm_r = (r - inner_r) / (outer_r);
-  return max_brightness * norm_r;
-}
-
-float pos_to_brightness3(float x, float z, float r, float inner_r,
-                         float outer_r, float max_brightness) {
-  float curve = -(r - inner_r) * (r - outer_r);
-  curve /= ((outer_r - inner_r) / 2.0f) * ((outer_r - inner_r) / 2.0f);
-  return max_brightness * curve;
-  // return 50;
-}
-struct vec3 {
-  float x, y, z;
-};
 const float dlambda = 0.2f;  // Smaller values yield more accurate results but
                              // take longer
 const int render =
     0;  // set to 1 enables rendering, 0 disables rendering for faster execution
 const int relativity =
     1;  // set to 1 enables relativistic effects, 0 disables them
-struct trace {
-  std::deque<std::pair<float, float>> head;
-  size_t max_length = 255;
-};
-struct photon {
-  int idx, idy;
-  float x, y, z;
-  float vx, vy, vz;
-  float r, phi;
-  float dr, dphi;
-  float L, E;
-  float b;
-  float dt;
-  float angle;
-  float brightness = 0.0f;
-  bool active;
-  vec3 u1, u2;
-  trace t;
-};
-
-struct accretiondisk {
-  float inner_r, outer_r;
-  float brightness;
-};
-
-struct photons {
-  std::vector<photon> list;
-};
-
-struct blackhole {
-  float x, y;
-  float sradius;
-};
 
 int main(int argc, char* argv[]) {
   printf("Number of threads: %d\n", omp_get_max_threads());
@@ -131,10 +69,10 @@ int main(int argc, char* argv[]) {
   for (int x = 0; x < img.width; x++) {
     for (int y = 0; y < img.height; y++) {
       float startX = X;
-      float startY = Y + (y * dy);  // Adjust 5.0f to change spacing
+      float startY = Y + (y * dy);
       float startZ = Z + (x * dz);
 
-      photon p = {};  // Zero initialize
+      photon p = {};
       p.idx = x;
       p.idy = y;
       p.x = startX;
@@ -150,12 +88,16 @@ int main(int argc, char* argv[]) {
     }
   }
   for (photon& p : ps.list) {
+    // The curvature of the path the light takes is calculated in a 2D plane.
+    // Here we calculate the 2D local basis vectors for each photon.
+
     // 1. Original 3D vectors
     vec3 pos3D = {p.x, p.y, p.z};
     vec3 vel3D = {p.vx, p.vy, p.vz};
-    vec3 L_vec = {pos3D.y * vel3D.z - pos3D.z * vel3D.y,
-                  pos3D.z * vel3D.x - pos3D.x * vel3D.z,
-                  pos3D.x * vel3D.y - pos3D.y * vel3D.x};
+    vec3 L_vec = {
+        pos3D.y * vel3D.z - pos3D.z * vel3D.y,
+        pos3D.z * vel3D.x - pos3D.x * vel3D.z,
+        pos3D.x * vel3D.y - pos3D.y * vel3D.x};  // The plane's normal vector
 
     // 2. u1 is just the normalized starting position vector
 
@@ -181,17 +123,11 @@ int main(int argc, char* argv[]) {
 
     // 4. Project 3D position/velocity into 2D basis
 
-    // p.x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
-    // p.y = (pos3D.x * p.u2.x + pos3D.y * p.u2.y + pos3D.z * p.u2.z);
-
     float local_x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
     float local_y = (pos3D.x * p.u2.x + pos3D.y * p.u2.y + pos3D.z * p.u2.z);
 
     float local_vx = (vel3D.x * p.u1.x + vel3D.y * p.u1.y + vel3D.z * p.u1.z);
     float local_vy = (vel3D.x * p.u2.x + vel3D.y * p.u2.y + vel3D.z * p.u2.z);
-
-    // p.vx = local_vx;
-    // p.vy = local_vy;
 
     // 5. Now calculate Polar coordinates
     p.r = sqrtf(local_x * local_x + local_y * local_y);
@@ -199,7 +135,6 @@ int main(int argc, char* argv[]) {
     p.L = local_x * local_vy - local_y * local_vx;
 
     p.active = true;
-    // printf("Photon angle: %f degrees\n", p.angle * 180.0f / M_PI);
     float speed = sqrtf(local_vx * local_vx + local_vy * local_vy);
     p.E = speed;
     p.b = p.L / p.E;
