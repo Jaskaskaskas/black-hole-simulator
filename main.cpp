@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
 
   // The origin is at the center of the window
   blackhole bh = {0.0f, 0.0f, 15.0f};
-  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 80.0f};  // 190
+  accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 80.0f, 4.0f};
 
   float c = 1.0f;
   float angle = 0.0f * M_PI / 180.0f;
@@ -87,66 +87,15 @@ int main(int argc, char* argv[]) {
       ps.list.push_back(p);
     }
   }
+
+  int error = 0;
   for (photon& p : ps.list) {
-    // The curvature of the path the light takes is calculated in a 2D plane.
-    // Here we calculate the 2D local basis vectors for each photon.
+    error = error || initialize_photon(p, bh);
+  }
 
-    // 1. Original 3D vectors
-    vec3 pos3D = {p.x, p.y, p.z};
-    vec3 vel3D = {p.vx, p.vy, p.vz};
-    vec3 L_vec = {
-        pos3D.y * vel3D.z - pos3D.z * vel3D.y,
-        pos3D.z * vel3D.x - pos3D.x * vel3D.z,
-        pos3D.x * vel3D.y - pos3D.y * vel3D.x};  // The plane's normal vector
-
-    // 2. u1 is just the normalized starting position vector
-
-    float r_init =
-        sqrtf(pos3D.x * pos3D.x + pos3D.y * pos3D.y + pos3D.z * pos3D.z);
-    p.u1 = {pos3D.x / r_init, pos3D.y / r_init, pos3D.z / r_init};
-
-    // 3. u2 must be perpendicular to both L and u1 to complete the plane
-    // u2 = (L x u1) / |L x u1|
-    vec3 u2_raw = {L_vec.y * p.u1.z - L_vec.z * p.u1.y,
-                   L_vec.z * p.u1.x - L_vec.x * p.u1.z,
-                   L_vec.x * p.u1.y - L_vec.y * p.u1.x};
-
-    float u2_mag =
-        sqrtf(u2_raw.x * u2_raw.x + u2_raw.y * u2_raw.y + u2_raw.z * u2_raw.z);
-    if (u2_mag < 1e-6f) {
-      // Fallback for edge cases where pos and vel are parallel (straight into
-      // BH)
-      p.u2 = {0, 1, 0};
-    } else {
-      p.u2 = {u2_raw.x / u2_mag, u2_raw.y / u2_mag, u2_raw.z / u2_mag};
-    }
-
-    // 4. Project 3D position/velocity into 2D basis
-
-    float local_x = (pos3D.x * p.u1.x + pos3D.y * p.u1.y + pos3D.z * p.u1.z);
-    float local_y = (pos3D.x * p.u2.x + pos3D.y * p.u2.y + pos3D.z * p.u2.z);
-
-    float local_vx = (vel3D.x * p.u1.x + vel3D.y * p.u1.y + vel3D.z * p.u1.z);
-    float local_vy = (vel3D.x * p.u2.x + vel3D.y * p.u2.y + vel3D.z * p.u2.z);
-
-    // 5. Now calculate Polar coordinates
-    p.r = sqrtf(local_x * local_x + local_y * local_y);
-    p.phi = atan2f(local_y, local_x);
-    p.L = local_x * local_vy - local_y * local_vx;
-
-    p.active = true;
-    float speed = sqrtf(local_vx * local_vx + local_vy * local_vy);
-    p.E = speed;
-    p.b = p.L / p.E;
-
-    float vr = (local_x * local_vx + local_y * local_vy) / p.r;
-    float dr_mag = sqrtf(std::max(
-        0.0f, 1.0f - (1.0f - bh.sradius / p.r) * (p.b * p.b / (p.r * p.r))));
-
-    p.dr = vr > 0 ? dr_mag : -dr_mag;
-    p.dphi = p.b / (p.r * p.r);
-
-    p.dt = 1.0f / (1.0f - bh.sradius / p.r);
+  if (error) {
+    printf("An error occured when initializing photons");
+    return 1;
   }
 
   while (running) {
@@ -168,39 +117,13 @@ int main(int argc, char* argv[]) {
       if (!p.active) continue;
 
       if (relativity) {
-        float r2 = p.r * p.r;
-        float r3 = r2 * p.r;
-
-        float d2r =
-            (bh.sradius * p.L * p.L) / (r2 * r2) - (bh.sradius / (2 * r2));
-
-        p.dr += d2r * dlambda;
-        p.r += p.dr * dlambda;
-        p.phi += (p.L / r2) * dlambda;
-
-        // Calculate global coordinates from local coordinates
-        float worldX = p.r * cosf(p.phi) * p.u1.x + p.r * sinf(p.phi) * p.u2.x;
-        float worldY = p.r * cosf(p.phi) * p.u1.y + p.r * sinf(p.phi) * p.u2.y;
-        float worldZ = p.r * cosf(p.phi) * p.u1.z + p.r * sinf(p.phi) * p.u2.z;
-
-        float old_y = p.y;
-
-        p.x = worldX;
-        p.y = worldY;
-        p.z = worldZ;
+        relativistic_simulation(p, bh, dlambda);
       } else {
-        // Non-relativistic initialization
-        float old_r = p.r;
-        p.x += p.vx;
-        p.y += p.vy;
-        p.z += p.vz;
-        p.r = sqrtf(p.x * p.x + p.y * p.y + p.z * p.z);
-        p.dr = p.r - old_r;
+        non_relativistic_simulation(p);
       }
 
-      if (p.dr > 0.0f && p.r > limit) {
-        // float background_brightness = -99.0f;  // background brightness
-        float background_brightness = 1000.0f;  // background brightness
+      if (p.dr > 0.0f && p.r > limit) {  // Checks for escaping photons
+        float background_brightness = 1000.0f;
         img.data[3 * (img.width * p.idy + p.idx)] =
             img.data[3 * (img.width * p.idy + p.idx)] + background_brightness;
         p.active = false;
@@ -219,7 +142,8 @@ int main(int argc, char* argv[]) {
         //    (old_y > 0.0f &&
         //     p.y <= 0.0f)) {  // The accretion disk is on the xz-plane, where
         // y = 0. Thus crossing y = 0 means crossing the disk
-        if (p.y <= 2.0f && p.y >= -2.0f) {  // Thin disk approximation
+        if (p.y <= ad.thickness / 2.0f &&
+            p.y >= -ad.thickness / 2.0f) {  // Thin disk approximation
           // TODO: add opaque parts to the disk (could be very non-trivial)
           float temperature = pos_to_brightness(p.x, p.z, p.r, ad.inner_r,
                                                 ad.outer_r, ad.brightness);
@@ -262,6 +186,7 @@ int main(int argc, char* argv[]) {
     }
   }
 
+  // Crude scaling of the images brightness
   image balance_img = {img.width, img.height,
                        std::vector<float>(img.width * img.height * 3, 0)};
 
@@ -274,18 +199,11 @@ int main(int argc, char* argv[]) {
   float dif = max - min;
   printf("Image max: %f min: %f\n", max, min);
   for (size_t i = 0; i < img.data.size(); i += 3) {
-    if (img.data[i] == -99.0f) {
-      uint8_t value = static_cast<uint>(log2((dif) / 2) * 0.0f);
-      balance_img.data[i] = value;
-      balance_img.data[i + 1] = value;
-      balance_img.data[i + 2] = value;
-    } else {
-      float norm = log2(((img.data[i] - min) / dif) + 1);
-      uint8_t val = static_cast<uint>(norm * 255.0f);
-      balance_img.data[i] = val;
-      balance_img.data[i + 1] = val;
-      balance_img.data[i + 2] = val;
-    }
+    float norm = log2(((img.data[i] - min) / dif) + 1);
+    uint8_t val = static_cast<uint>(norm * 255.0f);
+    balance_img.data[i] = val;
+    balance_img.data[i + 1] = val;
+    balance_img.data[i + 2] = val;
   }
 
   save_ppm(balance_img, "output.ppm");

@@ -27,6 +27,7 @@ struct photon {
 struct accretiondisk {
   float inner_r, outer_r;
   float brightness;
+  float thickness;
 };
 
 struct photons {
@@ -46,3 +47,9 @@ float pos_to_brightness2(float x, float z, float r, float inner_r,
 
 float pos_to_brightness3(float x, float z, float r, float inner_r,
                          float outer_r, float max_brightness);
+
+int initialize_photon(photon& p, blackhole& bh);
+
+int relativistic_simulation(photon& p, blackhole& bh, float dlambda);
+
+int non_relativistic_simulation(photon& p);
