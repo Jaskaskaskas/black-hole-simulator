@@ -12,7 +12,7 @@ sudo apt install -y build-essential pkg-config libsdl2-dev
 Build and run (uses `pkg-config` to locate SDL2):
 
 ```bash
-g++ main.cpp -o bh `pkg-config --cflags --libs sdl2`
+g++ main.cpp graphics_tools.cpp physics.cpp -o bh `pkg-config --cflags --libs sdl2` -fopenmp
 ./bh
 ```
 
