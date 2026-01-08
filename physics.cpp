@@ -117,7 +117,6 @@ int relativistic_simulation(photon& p, blackhole& bh, float dlambda) {
 }
 
 int non_relativistic_simulation(photon& p) {
-  // Non-relativistic initialization
   float old_r = p.r;
   p.x += p.vx;
   p.y += p.vy;
@@ -126,4 +125,41 @@ int non_relativistic_simulation(photon& p) {
   p.dr = p.r - old_r;
 
   return 0;
+}
+
+vec3 photon_direction(int x, int y, float theta, float phi, float fov,
+                      int width, int height) {
+  float horizontal_id =
+      (x - (width / 2)) +
+      0.5f;  // horizontal and vertical refer to pixel locations in output image
+  float vertical_id = (y - (height / 2)) + 0.5f;
+
+  float horizontal_range = tanf(fov / 2.0f);
+  float vertical_range = tanf(fov / 2.0f);
+
+  float horizontal_offset = horizontal_range / width;
+  float vertical_offset = vertical_range / height;
+
+  vec3 target = {1.0f, vertical_id * vertical_offset,
+                 horizontal_id * horizontal_offset};
+
+  float length =
+      sqrtf(target.x * target.x + target.y * target.y + target.z * target.z);
+  vec3 normalized_target = {target.x / length, target.y / length,
+                            target.z / length};
+
+  // manual implementation of rotation matrix to match the camera direction
+  // implemented with two distinct rotations around the z-
+
+  vec3 first_rotation = {
+      cosf(phi) * normalized_target.x - sinf(phi) * normalized_target.y,
+      sinf(phi) * normalized_target.x + cosf(phi) * normalized_target.y,
+      normalized_target.z};
+
+  vec3 second_rotation = {
+      first_rotation.x,
+      cosf(theta) * first_rotation.y - sinf(theta) * first_rotation.z,
+      sinf(theta) * first_rotation.y + cosf(theta) * first_rotation.z};
+
+  return second_rotation;
 }

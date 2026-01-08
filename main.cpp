@@ -47,28 +47,24 @@ int main(int argc, char* argv[]) {
   bool running = true;
   SDL_Event e;
 
-  image img = {1000, 1000,
-               std::vector<float>(img.width * img.height * 3, 0.0f)};
+  image img = {100, 100, std::vector<float>(img.width * img.height * 3, 0.0f)};
 
   // The origin is at the center of the window
   blackhole bh = {0.0f, 0.0f, 15.0f};
   accretiondisk ad = {bh.sradius * 1.8f, bh.sradius * 3.0f, 80.0f, 4.0f};
+
   vec3 camera = {-250.0f, -50.0f, 0.0f};
-  float camera_theta = 0.0f;  // in radians in the x-z plane
-  float camera_phi = 0.0f;    // in radians in the x-y plane
+  float camera_theta = 0.0f;  // in degrees in the x-z plane
+  float camera_phi = 10.0f;   // in degrees in the x-y plane
 
-  const float fov = 60.0f;  // degrees
+  float fov = 70.0f;  // degrees
 
-  const float dangle = (fov * 3.14159265f / 180.0f) /
-                       img.width;  // vertical and horizontal fovs are the same
+  camera_theta = M_PI * (camera_theta / 180.0f);  // transform to radians
+  camera_phi = M_PI * (camera_phi / 180.0f);
+  fov = M_PI * (fov / 180.0f);
 
-  const float X = -250.0f;
-  const float Y = -150.0f;
-  const float Z = -100.0f;
-  const float dy = 0.2f;
-  const float dz = 0.2f;
-
-  const float limit = sqrtf(X * X + Y * Y + Z * Z);
+  const float limit =
+      sqrtf(camera.x * camera.x + camera.y * camera.y + camera.z * camera.z);
 
   photons ps;
   for (int x = 0; x < img.width; x++) {
@@ -81,13 +77,13 @@ int main(int argc, char* argv[]) {
       p.z = camera.z;
 
       // Point them toward the Black Hole (positive X direction)
-      p.vx = cosf(camera_phi) * cosf(camera_theta);
-      p.vy = sinf(camera_phi);
-      p.vz = sinf(camera_theta) *
-             cosf(camera_phi);  // TODO: add the offset for each photon, has to
-                                // maybe be implemented using sort of local
-                                // coordinates?
 
+      vec3 dir = photon_direction(x, y, camera_theta, camera_phi, fov,
+                                  img.width, img.height);
+
+      p.vx = dir.x;
+      p.vy = dir.y;
+      p.vz = dir.z;
       ps.list.push_back(p);
     }
   }

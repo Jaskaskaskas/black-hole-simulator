@@ -53,3 +53,6 @@ int initialize_photon(photon& p, blackhole& bh);
 int relativistic_simulation(photon& p, blackhole& bh, float dlambda);
 
 int non_relativistic_simulation(photon& p);
+
+vec3 photon_direction(int x, int y, float theta, float phi, float fov,
+                      int width, int height);
